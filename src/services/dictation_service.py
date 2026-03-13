@@ -1,11 +1,18 @@
-"""Бизнес-логика: распознавание фото диктанта, проверка, оценка, агрегация результата."""
+"""Бизнес-логика: предобработка фото, OCR (два прохода), валидация, проверка диктанта, оценка."""
 
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from src.services.openai_client import check_dictation, recognize_text_from_image
 from src.services.grading_service import grade_by_errors
+from src.services.image_preprocess import preprocess_handwritten_image
+from src.services.openai_client import (
+    check_dictation,
+    ocr_result_to_text,
+    recognize_text_from_image_pass1,
+    recognize_text_from_image_pass2,
+)
+from src.services.ocr_validation import validate_ocr_result
 from src.utils.exceptions import DictationProcessingError, OpenAIServiceError
 
 logger = logging.getLogger(__name__)
@@ -30,13 +37,23 @@ class DictationResult:
 
 def process_dictation_photo(image_bytes: bytes) -> DictationResult:
     """
-    1) OCR по фото → распознанный текст
-    2) Проверка диктанта → JSON с ошибками и исправленным текстом
-    3) Подсчёт ошибок и оценка
-    Возвращает DictationResult для форматирования в хендлере.
+    1) Предобработка изображения
+    2) Два независимых прохода OCR по обработанному изображению
+    3) Валидация: confidence, кол-во неразборчивого, сходство проходов
+    4) При успехе — проверка диктанта и выставление оценки
     """
-    recognized_text = recognize_text_from_image(image_bytes)
-    logger.info("OCR completed, text length=%d", len(recognized_text))
+    processed = preprocess_handwritten_image(image_bytes)
+    logger.info("Image preprocessed, size=%d bytes", len(processed))
+
+    ocr1 = recognize_text_from_image_pass1(processed)
+    ocr2 = recognize_text_from_image_pass2(processed)
+
+    is_valid, error_message = validate_ocr_result(ocr1, ocr2)
+    if not is_valid:
+        raise DictationProcessingError(error_message)
+
+    recognized_text = ocr_result_to_text(ocr1)
+    logger.info("OCR validated, text length=%d", len(recognized_text))
 
     check = check_dictation(recognized_text)
     grading = grade_by_errors(
