@@ -121,6 +121,18 @@ def ocr_result_to_text(ocr: OcrResult) -> str:
     return "\n".join(str(line) for line in lines)
 
 
+def recognize_text_from_image(image_bytes: bytes) -> str:
+    """
+    Один проход OCR по изображению (предобработка + pass1).
+    Оставлено для обратной совместимости со старым кодом; новый код использует pass1/pass2 и validate.
+    """
+    from src.services.image_preprocess import preprocess_handwritten_image
+
+    processed = preprocess_handwritten_image(image_bytes)
+    ocr = recognize_text_from_image_pass1(processed)
+    return ocr_result_to_text(ocr)
+
+
 def check_dictation(recognized_text: str) -> Dict[str, Any]:
     """
     Проверяет диктант по распознанному тексту. Возвращает словарь:
